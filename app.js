@@ -1,7 +1,7 @@
 require("dotenv").config();
 const https = require("https");
 
-console.log("🚀 App is starting...\n");
+console.log("🚀 App starting...\n");
 
 // ================== CONFIG ==================
 const BASE_URL = "staging.collabmed.net";
@@ -12,58 +12,63 @@ const PLATFORM_SECRET = process.env.PLATFORM_SECRET;
 const CALLBACK_URL =
   process.env.CALLBACK_URL || "https://your-platform.com/callback";
 
-// ================== HELPER ==================
+// ================== LOGGER ==================
+function logStep(title, obj) {
+  console.log(`\n➡️ ${title}`);
+  console.log(JSON.stringify(obj, null, 2));
+}
+
+function logResponse(title, res) {
+  const short = {
+    success: res?.success,
+    message: res?.message,
+    handshake_token: res?.data?.handshake_token,
+    access_token: res?.data?.access_token ? "***RECEIVED***" : undefined,
+  };
+
+  console.log(`\n⬅️ ${title}`);
+  console.log(JSON.stringify(short, null, 2));
+}
+
+// ================== REQUEST FUNCTION ==================
 function postRequest(endpoint, payload, stepName) {
-  // ✅ SHOW PARAMETERS SENT
-  console.log("\n======================================");
-  console.log(`=== PARAMETERS SENT IN ${stepName.toUpperCase()} ===`);
-  console.log("======================================");
-  console.log(JSON.stringify(payload, null, 2));
+  logStep(`SEND → ${stepName}`, payload);
 
   return new Promise((resolve, reject) => {
-    const options = {
-      hostname: BASE_URL,
-      path: `/api/external${endpoint}`,
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const req = https.request(
+      {
+        hostname: BASE_URL,
+        path: `/api/external${endpoint}`,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        timeout: 10000,
       },
-      timeout: 10000, // prevent hanging
-    };
+      (res) => {
+        let data = "";
 
-    const req = https.request(options, (res) => {
-      let data = "";
+        res.on("data", (chunk) => {
+          data += chunk;
+        });
 
-      res.on("data", (chunk) => {
-        data += chunk;
-      });
-
-      res.on("end", () => {
-        try {
-          const json = JSON.parse(data);
-
-          // ✅ SHOW RESPONSE RECEIVED
-          console.log("\n======================================");
-          console.log(`=== RESPONSE FROM ${stepName.toUpperCase()} ===`);
-          console.log("======================================");
-          console.log(JSON.stringify(json, null, 2));
-
-          resolve(json);
-        } catch (err) {
-          console.error("❌ Failed to parse response:", data);
-          reject(err);
-        }
-      });
-    });
+        res.on("end", () => {
+          try {
+            const json = JSON.parse(data);
+            logResponse(`RESPONSE ← ${stepName}`, json);
+            resolve(json);
+          } catch (err) {
+            console.log("❌ Raw response:", data);
+            reject(err);
+          }
+        });
+      }
+    );
 
     req.on("timeout", () => {
-      console.error("⏱️ Request timed out");
       req.destroy();
       reject(new Error("Request timeout"));
     });
 
     req.on("error", (err) => {
-      console.error("❌ Request error:", err.message);
       reject(err);
     });
 
@@ -72,22 +77,20 @@ function postRequest(endpoint, payload, stepName) {
   });
 }
 
-// ================== MAIN ==================
+// ================== MAIN FLOW ==================
 async function runHandshake() {
   try {
     console.log("🔐 Step 1: Initiating handshake...\n");
 
-    const initiatePayload = {
-      platform_name: PLATFORM_NAME,
-      platform_key: PLATFORM_KEY,
-      platform_secret: PLATFORM_SECRET,
-      callback_url: CALLBACK_URL,
-    };
-
     const initResponse = await postRequest(
       "/initiate-handshake",
-      initiatePayload,
-      "Initiate Handshake"
+      {
+        platform_name: PLATFORM_NAME,
+        platform_key: PLATFORM_KEY,
+        platform_secret: PLATFORM_SECRET,
+        callback_url: CALLBACK_URL,
+      },
+      "INITIATE HANDSHAKE"
     );
 
     if (!initResponse.success) {
@@ -96,31 +99,33 @@ async function runHandshake() {
 
     const handshakeToken = initResponse.data.handshake_token;
 
-    console.log("\n✅ Handshake Initiated Successfully");
-    console.log("Handshake Token:", handshakeToken);
+    console.log("\n✔ Handshake token received");
 
     console.log("\n🔄 Step 2: Completing handshake...\n");
 
-    const completePayload = {
-      handshake_token: handshakeToken,
-      platform_key: PLATFORM_KEY,
-    };
-
     const completeResponse = await postRequest(
       "/complete-handshake",
-      completePayload,
-      "Complete Handshake"
+      {
+        handshake_token: handshakeToken,
+        platform_key: PLATFORM_KEY,
+      },
+      "COMPLETE HANDSHAKE"
     );
 
     if (!completeResponse.success) {
       throw new Error("Complete handshake failed");
     }
 
-    console.log("\n🎉 Handshake Completed Successfully");
-    console.log("Access Token:", completeResponse.data.access_token);
-    console.log("Refresh Token:", completeResponse.data.refresh_token);
+    // ================== FINAL OUTPUT ==================
+    console.log("\n🎉 DONE SUCCESSFULLY\n");
 
-    console.log("\n✅ FULL FLOW COMPLETE\n");
+    console.log("🔑 Access Token:");
+    console.log(completeResponse.data.access_token);
+
+    console.log("\n🔁 Refresh Token:");
+    console.log(completeResponse.data.refresh_token);
+
+    console.log("\n✅ Flow completed\n");
   } catch (err) {
     console.error("\n❌ ERROR:", err.message);
   }
