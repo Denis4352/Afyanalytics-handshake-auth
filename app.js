@@ -4,7 +4,7 @@ const https = require("https");
 console.log("🚀 App starting...\n");
 
 // ================== CONFIG ==================
-const BASE_URL = "staging.collabmed.net";
+const BASE_URL = "https://staging.collabmed.net";
 
 const PLATFORM_NAME = process.env.PLATFORM_NAME;
 const PLATFORM_KEY = process.env.PLATFORM_KEY;
@@ -15,19 +15,14 @@ const CALLBACK_URL =
 // ================== LOGGER ==================
 function logStep(title, obj) {
   console.log(`\n➡️ ${title}`);
+  console.log("📤 REQUEST:");
   console.log(JSON.stringify(obj, null, 2));
 }
 
 function logResponse(title, res) {
-  const short = {
-    success: res?.success,
-    message: res?.message,
-    handshake_token: res?.data?.handshake_token,
-    access_token: res?.data?.access_token ? "***RECEIVED***" : undefined,
-  };
-
   console.log(`\n⬅️ ${title}`);
-  console.log(JSON.stringify(short, null, 2));
+  console.log("📥 RESPONSE:");
+  console.log(JSON.stringify(res, null, 2)); // ✅ NO MASKING
 }
 
 // ================== REQUEST FUNCTION ==================
@@ -37,10 +32,12 @@ function postRequest(endpoint, payload, stepName) {
   return new Promise((resolve, reject) => {
     const req = https.request(
       {
-        hostname: BASE_URL,
+        hostname: BASE_URL.replace("https://", ""),
         path: `/api/external${endpoint}`,
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         timeout: 10000,
       },
       (res) => {
@@ -56,7 +53,8 @@ function postRequest(endpoint, payload, stepName) {
             logResponse(`RESPONSE ← ${stepName}`, json);
             resolve(json);
           } catch (err) {
-            console.log("❌ Raw response:", data);
+            console.log("❌ Raw response:");
+            console.log(data);
             reject(err);
           }
         });
@@ -82,48 +80,58 @@ async function runHandshake() {
   try {
     console.log("🔐 Step 1: Initiating handshake...\n");
 
+    const initPayload = {
+      platform_name: PLATFORM_NAME,
+      platform_key: PLATFORM_KEY,
+      platform_secret: PLATFORM_SECRET,
+      callback_url: CALLBACK_URL,
+    };
+
     const initResponse = await postRequest(
       "/initiate-handshake",
-      {
-        platform_name: PLATFORM_NAME,
-        platform_key: PLATFORM_KEY,
-        platform_secret: PLATFORM_SECRET,
-        callback_url: CALLBACK_URL,
-      },
+      initPayload,
       "INITIATE HANDSHAKE"
     );
 
     if (!initResponse.success) {
-      throw new Error("Initiate handshake failed");
+      throw new Error(initResponse.message || "Initiate handshake failed");
     }
 
     const handshakeToken = initResponse.data.handshake_token;
 
-    console.log("\n✔ Handshake token received");
+    console.log("\n✔ Handshake token received:");
+    console.log(handshakeToken);
 
     console.log("\n🔄 Step 2: Completing handshake...\n");
 
+    const completePayload = {
+      handshake_token: handshakeToken,
+      platform_key: PLATFORM_KEY,
+    };
+
     const completeResponse = await postRequest(
       "/complete-handshake",
-      {
-        handshake_token: handshakeToken,
-        platform_key: PLATFORM_KEY,
-      },
+      completePayload,
       "COMPLETE HANDSHAKE"
     );
 
     if (!completeResponse.success) {
-      throw new Error("Complete handshake failed");
+      throw new Error(completeResponse.message || "Complete handshake failed");
     }
+
+    const data = completeResponse.data;
 
     // ================== FINAL OUTPUT ==================
     console.log("\n🎉 DONE SUCCESSFULLY\n");
 
-    console.log("🔑 Access Token:");
-    console.log(completeResponse.data.access_token);
+    console.log("🔑 ACCESS TOKEN:");
+    console.log(data.access_token);
 
-    console.log("\n🔁 Refresh Token:");
-    console.log(completeResponse.data.refresh_token);
+    console.log("\n🔁 REFRESH TOKEN:");
+    console.log(data.refresh_token);
+
+    console.log("\n⏱️ EXPIRES AT:");
+    console.log(data.expires_at);
 
     console.log("\n✅ Flow completed\n");
   } catch (err) {
